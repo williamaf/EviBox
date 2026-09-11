@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>EviBox - Preservación de Evidencia Digital</title>
+  
+  <link rel="manifest" href="manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="EviBox">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="theme-color" content="#0f172a">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: '#1d9bf0',
+            darkbg: '#0f172a',
+            cardbg: '#1e293b'
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    @media print {
+      header, .no-print { display: none !important; }
+      
+      body.printing-single-mode .evidence-card:not(.print-this-card) {
+        display: none !important;
+      }
+
+      .evidence-card.print-this-card {
+        border: 1px solid #000 !important;
+        background: white !important;
+        color: black !important;
+        box-shadow: none !important;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      
+      .evidence-card.print-this-card * {
+        color: black !important;
+      }
+
+      .text-brand, .text-slate-400, .text-slate-300, .text-slate-200 { color: black !important; }
+      .bg-slate-900, .bg-slate-950, .bg-cardbg { background: #f8fafc !important; border: 1px solid #ccc !important; }
+      
+      .evidence-card.print-this-card .meta-table-container {
+        display: block !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-darkbg text-slate-200 min-h-screen p-4 md:p-8 font-sans antialiased selection:bg-brand selection:text-white">
+
+  <div class="max-w-3xl mx-auto space-y-6">
+    
+    <!-- Header -->
+    <header class="flex items-center justify-between border-b border-slate-800/80 pb-4 pt-2">
+      <div class="flex items-center gap-2.5">
+        <div class="w-10 h-10 rounded-xl bg-brand/10 border border-brand/30 flex items-center justify-center text-brand font-bold text-xl shadow-sm">
+          📦
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight text-white leading-tight">EviBox <span class="text-xs px-2 py-0.5 rounded bg-brand/20 text-brand font-mono">v2.0 Forensic</span></h1>
+          <p class="text-xs text-slate-400">Bóveda de Evidencia Digital & Metadatos Criptográficos</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="folderBtn" onclick="selectStorageFolder()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/80 px-3 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+          📁 <span>Vincular Carpeta Local</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Entrada de URL Multi-Red -->
+    <div class="bg-cardbg p-4 rounded-2xl border border-slate-800 shadow-xl space-y-3 no-print">
+      <div class="flex justify-between items-center">
+        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider">Ingresa Enlace de Evidencia</label>
+        <span class="text-[10px] text-slate-500 font-mono">X / IG / TikTok / YT / FB</span>
+      </div>
+      <div class="flex flex-col sm:flex-row gap-2">
+        <input id="evidenceUrl" type="url" placeholder="https://x.com/..., instagram.com/..., tiktok.com/..., youtube.com/..., facebook.com/..." 
+               class="flex-1 bg-slate-900 border border-slate-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition">
+        <button onclick="archiveEvidence()" class="bg-brand hover:bg-sky-500 active:scale-95 text-white font-medium px-6 py-3 rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-brand/20">
+          <span>Archivar</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Historial de Evidencias -->
+    <div class="space-y-4">
+      <div class="flex items-center justify-between px-1 no-print">
+        <h2 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Evidencias Preservadas</h2>
+        <button onclick="clearHistory()" class="text-xs text-rose-400 hover:text-rose-300 transition">Borrar Vista Rápida</button>
+      </div>
+      
+      <div id="archivedList" class="space-y-4"></div>
+    </div>
+
+  </div>
+
+  <script>
+    let dirHandle = null;
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadHistory();
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').catch(err => console.log('SW Error:', err));
+      }
+    });
+
+    async function selectStorageFolder() {
+      try {
+        if ('showDirectoryPicker' in window) {
+          dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+          document.getElementById('folderBtn').innerHTML = `✅ <span class="text-emerald-400">Carpeta Conectada</span>`;
+          alert('Carpeta EviBox conectada correctamente.');
+        } else {
+          alert('Tu navegador no soporta File System Access API.');
+        }
+      } catch (err) {
+        console.error('Selección de carpeta cancelada', err);
+      }
+    }
+
+    async function generateSHA256(text) {
+      const msgUint8 = new TextEncoder().encode(text);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function archiveEvidence() {
+      const urlInput = document.getElementById('evidenceUrl').value.trim();
+      if (!urlInput) return alert('Ingresa una URL válida');
+
+      let platform = 'Unknown';
+      if (urlInput.includes('x.com') || urlInput.includes('twitter.com')) platform = 'Twitter';
+      else if (urlInput.includes('instagram.com')) platform = 'Instagram';
+      else if (urlInput.includes('tiktok.com')) platform = 'TikTok';
+      else if (urlInput.includes('youtube.com') || urlInput.includes('youtu.be')) platform = 'YouTube';
+      else if (urlInput.includes('facebook.com') || urlInput.includes('fb.watch')) platform = 'Facebook';
+
+      try {
+        let extractedData = null;
+
+        // 1. X / TWITTER
+        if (platform === 'Twitter') {
+          const match = urlInput.match(/status\/(\d+)/);
+          if (!match) throw new Error('ID de Tweet no encontrado');
+          const tweetId = match[1];
+          const res = await fetch(`https://api.fxtwitter.com/status/${tweetId}`);
+          const result = await res.json();
+          if (result.code !== 200) throw new Error('No se pudo obtener la publicación de X');
+          
+          const tweet = result.tweet;
+          const photos = tweet.media && tweet.media.photos ? tweet.media.photos.map(p => p.url) : [];
+          const videos = tweet.media && tweet.media.videos ? tweet.media.videos.map(v => v.url) : [];
+
+          extractedData = {
+            id: tweet.id,
+            platform: 'Twitter',
+            author_name: tweet.author.name,
+            author_handle: `@${tweet.author.screen_name}`,
+            content: tweet.text,
+            timestamp: new Date(tweet.created_at * 1000 || tweet.created_at).toISOString(),
+            metrics: { likes: tweet.likes || 0, retweets: tweet.retweets || 0, replies: tweet.replies || 0 },
+            media: photos.concat(videos),
+            url: tweet.url || urlInput
+          };
+        } 
+        // 2. YOUTUBE, FACEBOOK, INSTAGRAM, TIKTOK
+        else if (['Instagram', 'TikTok', 'YouTube', 'Facebook'].includes(platform)) {
+          let cleanUrl = urlInput.trim();
+
+          if (platform === 'YouTube') {
+            let videoId = '';
+            if (cleanUrl.includes('youtu.be/')) {
+              videoId = cleanUrl.split('youtu.be/')[1].split('?')[0].split('&')[0];
+              cleanUrl = `https://www.youtube.com/watch?v=${videoId}`;
+            } else if (cleanUrl.includes('watch?v=')) {
+              videoId = cleanUrl.split('watch?v=')[1].split('&')[0];
+            }
+
+            try {
+              const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(cleanUrl)}&format=json`;
+              const res = await fetch(oembedUrl);
+              if (!res.ok) throw new Error('No se pudo obtener la información del video de YouTube');
+              const ytData = await res.json();
+
+              let likesCount = 0;
+              if (videoId) {
+                try {
+                  const likesRes = await fetch(`https://returnyoutubelikecountapi.com/votes?videoId=${videoId}`);
+                  if (likesRes.ok) {
+                    const likesData = await likesRes.json();
+                    likesCount = likesData.likes || 0;
+                  }
+                } catch (e) {
+                  console.warn('No se pudieron consultar los likes:', e);
+                }
+              }
+
+              const itemId = videoId || Date.now().toString();
+
+              extractedData = {
+                id: itemId,
+                platform: 'YouTube',
+                author_name: ytData.author_name,
+                author_handle: ytData.author_url ? `@${ytData.author_url.split('/').pop()}` : '@youtube_channel',
+                content: ytData.title,
+                timestamp: new Date().toISOString(),
+                metrics: { likes: likesCount, retweets: 0, replies: 0 },
+                media: [ytData.thumbnail_url],
+                url: cleanUrl
+              };
+            } catch (ytErr) {
+              throw new Error(`Error procesando YouTube: ${ytErr.message}`);
+            }
+          } 
+          else {
+            cleanUrl = cleanUrl.split('?')[0];
+            let mediaUrls = [];
+            let contentText = `Publicación guardada desde ${platform}`;
+            let authorName = `Publicación de ${platform}`;
+            let authorHandle = `@${platform.toLowerCase()}_user`;
+
+            if (platform === 'Facebook') {
+              const urlParts = cleanUrl.replace('https://www.facebook.com/', '').split('/');
+              if (urlParts[0] && !['share', 'posts', 'watch', 'photo.php', 'story.php', 'groups'].includes(urlParts[0])) {
+                authorName = urlParts[0];
+                authorHandle = `@${urlParts[0]}`;
+              } else if (cleanUrl.includes('/share/p/') || cleanUrl.includes('/share/r/')) {
+                const postId = cleanUrl.split('/share/')[1]?.split('/')[1]?.replace('/', '');
+                if (postId) authorHandle = `@fb_post_${postId.substring(0, 8)}`;
+              }
+            }
+
+            // Intento 1: noembed / oEmbed
+            try {
+              const noembedUrl = `https://noembed.com/embed?url=${encodeURIComponent(cleanUrl)}`;
+              const noembedRes = await fetch(noembedUrl);
+              if (noembedRes.ok) {
+                const noembedData = await noembedRes.json();
+                if (noembedData.title) contentText = noembedData.title;
+                if (noembedData.author_name) {
+                  authorName = noembedData.author_name;
+                  authorHandle = `@${noembedData.author_name.toLowerCase().replace(/\s+/g, '_')}`;
+                }
+                if (noembedData.thumbnail_url) mediaUrls.push(noembedData.thumbnail_url);
+              }
+            } catch (e) {
+              console.warn('Fallback oEmbed no disponible:', e);
+            }
+
+            // Intento 2: Proxy multimedia (Cobalt)
+            if (mediaUrls.length === 0) {
+              try {
+                const targetApi = 'https://cobalt-api.kwiatekm.pl/';
+                const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(targetApi)}`;
+
+                const res = await fetch(proxyUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({ url: cleanUrl, vCodec: 'h264' })
+                });
+
+                if (res.ok) {
+                  const result = await res.json();
+                  if (result.url) mediaUrls.push(result.url);
+                  else if (result.picker && Array.isArray(result.picker)) {
+                    mediaUrls = result.picker.map(item => item.url);
+                  }
+                }
+              } catch (apiErr) {
+                console.warn('Proxy multimedia no devolvió miniatura:', apiErr);
+              }
+            }
+
+            // Intento 3: Miniatura y Metadatos vía Microlink OpenGraph API
+            if (mediaUrls.length === 0 || authorHandle.includes('_user')) {
+              try {
+                const ogRes = await fetch(`https://api.microlink.io?url=${encodeURIComponent(cleanUrl)}`);
+                if (ogRes.ok) {
+                  const ogData = await ogRes.json();
+                  if (mediaUrls.length === 0 && ogData.data?.image?.url) {
+                    mediaUrls.push(ogData.data.image.url);
+                  }
+                  if (ogData.data?.title && contentText.startsWith('Publicación guardada desde')) {
+                    contentText = ogData.data.title;
+                  }
+                  if (ogData.data?.publisher && authorName.startsWith('Publicación de')) {
+                    authorName = ogData.data.publisher;
+                  }
+                }
+              } catch (ogErr) {
+                console.warn('No se pudo extraer miniatura OpenGraph:', ogErr);
+              }
+            }
+
+            // Extracción Inteligente de Autor para TIKTOK
+            if (platform === 'TikTok') {
+              const urlHandleMatch = cleanUrl.match(/@([\w\.-]+)/);
+              if (urlHandleMatch) {
+                authorHandle = `@${urlHandleMatch[1]}`;
+                authorName = urlHandleMatch[1];
+              }
+
+              const contentMatch = contentText.match(/^(.*?)\s*\((@[\w\.-]+)\)/);
+              if (contentMatch) {
+                authorName = contentMatch[1].trim();
+                authorHandle = contentMatch[2];
+              }
+            }
+
+            // Extracción Inteligente de Autor para INSTAGRAM
+            if (platform === 'Instagram') {
+              const handleMatch = contentText.match(/\((@[\w\.]+)\)/);
+              if (handleMatch) {
+                authorHandle = handleMatch[1];
+                const rawName = contentText.split('(')[0].replace('Instagram reel', '').trim();
+                authorName = rawName || handleMatch[1].replace('@', '');
+              } else if (contentText.includes('•')) {
+                authorName = contentText.split('•')[0].trim();
+                authorHandle = `@${authorName.toLowerCase().replace(/\s+/g, '_')}`;
+              }
+            }
+
+            // Extracción Inteligente de Autor para FACEBOOK
+            if (platform === 'Facebook' && (authorName.startsWith('Publicación de') || authorHandle.includes('facebook_user'))) {
+              if (contentText.includes('|')) {
+                const parts = contentText.split('|');
+                const lastSegment = parts[parts.length - 1].trim();
+                if (lastSegment && lastSegment.length < 30) {
+                  authorName = lastSegment;
+                  authorHandle = `@${lastSegment.toLowerCase().replace(/\s+/g, '_')}`;
+                }
+              }
+            }
+
+            if (contentText.startsWith('Publicación guardada desde')) {
+              contentText = `Evidencia multimedia preservada desde ${platform}\nURL: ${cleanUrl}`;
+            }
+
+            const itemId = Date.now().toString();
+
+            extractedData = {
+              id: itemId,
+              platform: platform,
+              author_name: authorName,
+              author_handle: authorHandle,
+              content: contentText,
+              timestamp: new Date().toISOString(),
+              metrics: { likes: 0, retweets: 0, replies: 0 },
+              media: mediaUrls,
+              url: cleanUrl
+            };
+          }
+        }
+        else {
+          throw new Error('Plataforma no soportada. Utiliza enlaces de X (Twitter), Instagram, TikTok, YouTube o Facebook.');
+        }
+
+        const processedAt = new Date().toISOString();
+        const rawStringForHash = `${extractedData.id}-${extractedData.content}-${processedAt}`;
+        const sha256Hash = await generateSHA256(rawStringForHash);
+
+        const archivedData = {
+          "evibox_version": "2.0-forensic",
+          "_processed_at": processedAt,
+          "sha256_hash": sha256Hash,
+          "platform": extractedData.platform,
+          "url": extractedData.url,
+          "author": extractedData.author_handle,
+          "author_name": extractedData.author_name,
+          "content": extractedData.content,
+          "timestamp": extractedData.timestamp,
+          "bookmark_count": extractedData.metrics.likes,
+          "retweet_count": extractedData.metrics.retweets,
+          "reply_count": extractedData.metrics.replies,
+          "conversation_id_str": extractedData.id,
+          "extended_entities": {
+            "media": extractedData.media
+          }
+        };
+
+        if (dirHandle) {
+          await saveToLocalFolder(archivedData);
+        }
+
+        saveToLocalStorage(archivedData);
+        document.getElementById('evidenceUrl').value = '';
+        loadHistory();
+      } catch (err) {
+        alert('Error extrayendo evidencia: ' + err.message);
+      }
+    }
+
+    async function saveToLocalFolder(data) {
+      try {
+        const filename = `EviBox_${data.platform}_${data.conversation_id_str}.json`;
+        const fileHandle = await dirHandle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(data, null, 2));
+        await writable.close();
+      } catch (e) {
+        console.error("Error guardando archivo físico", e);
+      }
+    }
+
+    function saveToLocalStorage(data) {
+      let history = JSON.parse(localStorage.getItem('evibox_archive') || '[]');
+      history = history.filter(item => item.conversation_id_str !== data.conversation_id_str);
+      history.unshift(data);
+      localStorage.setItem('evibox_archive', JSON.stringify(history));
+    }
+
+    function loadHistory() {
+      const history = JSON.parse(localStorage.getItem('evibox_archive') || '[]');
+      const container = document.getElementById('archivedList');
+      container.innerHTML = '';
+
+      if (history.length === 0) {
+        container.innerHTML = `<div class="bg-cardbg/50 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-sm">No hay ninguna evidencia guardada en la bóveda.</div>`;
+        return;
+      }
+
+      history.forEach((data, index) => {
+        const mediaList = data.extended_entities ? data.extended_entities.media : [];
+        let mediaHTML = '';
+        if (mediaList.length > 0) {
+          mediaHTML = `
+            <div class="grid grid-cols-2 gap-2 mt-3">
+              ${mediaList.map(item => `
+                <div class="overflow-hidden rounded-xl border border-slate-700/60 bg-slate-900 group">
+                  ${item.includes('.mp4') ? 
+                    `<video src="${item}" controls class="w-full h-44 object-cover"></video>` :
+                    `<a href="${item}" target="_blank"><img src="${item}" loading="lazy" class="w-full h-36 object-cover group-hover:scale-105 transition duration-300"></a>`
+                  }
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+
+        const formattedDate = new Date(data.timestamp).toLocaleString();
+        
+        let platformBadge = '𝕏 Twitter';
+        if (data.platform === 'TikTok') platformBadge = '🎵 TikTok';
+        else if (data.platform === 'Instagram') platformBadge = '📸 Instagram';
+        else if (data.platform === 'YouTube') platformBadge = '▶️ YouTube';
+        else if (data.platform === 'Facebook') platformBadge = '📘 Facebook';
+
+        const card = `
+          <div class="evidence-card bg-cardbg rounded-2xl border border-slate-800 p-5 shadow-xl space-y-4">
+            <div class="flex justify-between items-start gap-2">
+              <div class="truncate">
+                <div class="flex items-center gap-2">
+                  <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-brand">${platformBadge}</span>
+                  <h3 class="text-sm font-bold text-white truncate">${data.author_name} <span class="text-slate-400 font-normal">${data.author}</span></h3>
+                </div>
+                <p class="text-[11px] text-slate-500 font-mono mt-0.5">${formattedDate}</p>
+              </div>
+              <div class="flex gap-1.5 no-print">
+                <button onclick="printSingleCard(${index})" title="Exportar Ficha Judicial" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/80 px-2 py-1.5 rounded-lg transition">
+                  🖨️ Ficha
+                </button>
+                <button onclick="toggleMetadata(${index})" class="text-xs bg-slate-800 hover:bg-slate-700 text-brand border border-slate-700/80 px-2.5 py-1.5 rounded-lg transition">
+                  🔍 Ver Metadata
+                </button>
+                <button onclick="copySingleJSON(${index})" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1.5 rounded-lg border border-slate-700/80 transition">
+                  📋 JSON
+                </button>
+              </div>
+            </div>
+
+            <p class="text-sm text-slate-200 leading-relaxed whitespace-pre-line break-words">${data.content}</p>
+
+            ${mediaHTML}
+
+            <div class="flex items-center gap-5 pt-3 border-t border-slate-800/80 text-xs font-mono text-slate-400">
+              <span><strong class="text-rose-400">❤️ ${(data.bookmark_count || 0).toLocaleString()}</strong></span>
+              <span><strong class="text-emerald-400">🔁 ${(data.retweet_count || 0).toLocaleString()}</strong></span>
+              <span><strong class="text-brand">💬 ${(data.reply_count || 0).toLocaleString()}</strong></span>
+            </div>
+
+            <div class="bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/80 flex items-center justify-between text-[10px] font-mono">
+              <span class="text-slate-500">SHA-256:</span>
+              <span class="text-emerald-400 truncate ml-2">${data.sha256_hash}</span>
+            </div>
+
+            <div id="meta-table-${index}" class="meta-table-container hidden pt-3 border-t border-slate-800/80">
+              <div class="bg-slate-900/90 rounded-xl border border-slate-800 overflow-hidden text-xs">
+                <table class="w-full text-left font-mono">
+                  <thead class="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th class="p-2.5 w-1/3 border-r border-slate-800">Key</th>
+                      <th class="p-2.5 w-2/3">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-800/60">
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">evibox_version</td><td class="p-2 text-slate-300">${data.evibox_version}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">sha256_hash</td><td class="p-2 text-emerald-400 break-all">${data.sha256_hash}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">_processed_at</td><td class="p-2 text-slate-300 break-all">${data._processed_at}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">platform</td><td class="p-2 text-slate-300">${data.platform}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">url</td><td class="p-2 text-brand break-all">${data.url}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">author</td><td class="p-2 text-slate-300">${data.author}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">content</td><td class="p-2 text-slate-300 whitespace-pre-line">${data.content}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">timestamp</td><td class="p-2 text-slate-300">${data.timestamp}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">conversation_id_str</td><td class="p-2 text-slate-300">${data.conversation_id_str}</td></tr>
+                    <tr><td class="p-2 text-slate-400 border-r border-slate-800">extended_entities</td><td class="p-2 text-emerald-400"><pre class="overflow-x-auto">${JSON.stringify(data.extended_entities, null, 2)}</pre></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        `;
+        container.innerHTML += card;
+      });
+    }
+
+    function printSingleCard(index) {
+      const cards = document.querySelectorAll('.evidence-card');
+      if (!cards[index]) return;
+
+      document.body.classList.add('printing-single-mode');
+      cards[index].classList.add('print-this-card');
+
+      window.print();
+
+      document.body.classList.remove('printing-single-mode');
+      cards[index].classList.remove('print-this-card');
+    }
+
+    function toggleMetadata(index) {
+      const table = document.getElementById(`meta-table-${index}`);
+      table.classList.toggle('hidden');
+    }
+
+    function copySingleJSON(index) {
+      const history = JSON.parse(localStorage.getItem('evibox_archive') || '[]');
+      if (history[index]) {
+        navigator.clipboard.writeText(JSON.stringify(history[index], null, 2));
+        alert('JSON copiado al portapapeles');
+      }
+    }
+
+    function clearHistory() {
+      if (confirm('¿Eliminar vista previa? Tus archivos guardados en el disco duro NO se borrarán.')) {
+        localStorage.removeItem('evibox_archive');
+        loadHistory();
+      }
+    }
+  </script>
+</body>
+</html>
